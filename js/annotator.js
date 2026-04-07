@@ -10,6 +10,12 @@ const Annotator = (() => {
   let _strokeSize = 3;
   let _docId = null;
   let _onChange = null;
+  let _laserHideTimer = null;
+
+  const LASER_IDLE_MS = 120;
+  const LASER_FADE_DELAY_MS = 180;
+  const LASER_FADE_MS = 780;
+  const MAX_PIXEL_RATIO = 2;
 
   const _pages = new Map();
   const _eraserEl = document.createElement('div');
@@ -50,11 +56,11 @@ const Annotator = (() => {
   }
 
   function _pageWidth(state) {
-    return state.canvas.width || 1;
+    return state.renderWidth || state.canvas.width || 1;
   }
 
   function _pageHeight(state) {
-    return state.canvas.height || 1;
+    return state.renderHeight || state.canvas.height || 1;
   }
 
   function _strokeWidthPx(stroke, state) {
@@ -76,8 +82,17 @@ const Annotator = (() => {
     const rect = canvas.getBoundingClientRect();
     return {
       x: _clamp01((e.clientX - rect.left) / rect.width),
-      y: _clamp01((e.clientY - rect.top) / rect.height)
+      y: _clamp01((e.clientY - rect.top) / rect.height),
+      pressure: _pointerPressure(e)
     };
+  }
+
+  function _pointerPressure(event) {
+    if (event.pointerType === 'mouse') return 0.58;
+    if (typeof event.pressure === 'number' && event.pressure > 0) {
+      return Math.max(0.22, Math.min(1, event.pressure));
+    }
+    return 0.6;
   }
 
   function _normalizeLoadedStroke(stroke, width, height) {
@@ -109,7 +124,10 @@ const Annotator = (() => {
       points: Array.isArray(stroke.points)
         ? stroke.points.map((point) => ({
             x: _clamp01((point.x || 0) / safeWidth),
-            y: _clamp01((point.y || 0) / safeHeight)
+            y: _clamp01((point.y || 0) / safeHeight),
+            pressure: typeof point.pressure === 'number'
+              ? Math.max(0.22, Math.min(1, point.pressure))
+              : undefined
           }))
         : [],
       start: stroke.start
@@ -150,24 +168,35 @@ const Annotator = (() => {
   }
 
   function initPage(pageNum, canvas, width, height) {
-    canvas.width = width;
-    canvas.height = height;
+    const pixelRatio = Math.max(1, Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO));
+    canvas.width = Math.round(width * pixelRatio);
+    canvas.height = Math.round(height * pixelRatio);
+    canvas.style.width = `${width}px`;
+    canvas.style.height = `${height}px`;
 
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { alpha: true, desynchronized: true });
+    ctx.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    ctx.imageSmoothingEnabled = true;
 
     const strokes = _restoreStrokes(pageNum, width, height);
     const state = {
       pageNum,
       canvas,
       ctx,
+      renderWidth: width,
+      renderHeight: height,
+      pixelRatio,
       strokes,
       drawing: false,
       currentStroke: null,
       undoStack: [],
       redoStack: [],
-      erasing: false
+      erasing: false,
+      laserStrokes: [],
+      activeLaserStroke: null,
+      laserAnimationFrame: 0
     };
 
     _pages.set(pageNum, state);
@@ -176,10 +205,12 @@ const Annotator = (() => {
     canvas.addEventListener('pointerdown', (e) => _onDown(e, pageNum, state));
     canvas.addEventListener('pointermove', (e) => _onMove(e, pageNum, state));
     canvas.addEventListener('pointerup', (e) => _onUp(e, pageNum, state));
-    canvas.addEventListener('pointerout', (e) => _onUp(e, pageNum, state));
+    canvas.addEventListener('pointercancel', (e) => _onUp(e, pageNum, state));
     canvas.addEventListener('pointerleave', () => {
-      _hideLaser();
-      if (_currentTool !== 'eraser') {
+      if (_currentTool === 'laser' && !state.drawing) {
+        _scheduleLaserHide(40);
+      }
+      if (_currentTool !== 'eraser' || !state.drawing) {
         _eraserEl.style.display = 'none';
       }
     });
@@ -195,9 +226,14 @@ const Annotator = (() => {
 
     e.preventDefault();
     state.drawing = true;
+    state.canvas.setPointerCapture?.(e.pointerId);
 
     if (_currentTool === 'laser') {
+      state.activeLaserStroke = {
+        points: [_fromPointer(e, state.canvas)]
+      };
       _showLaser(e);
+      _redraw(state);
       return;
     }
 
@@ -213,7 +249,7 @@ const Annotator = (() => {
       tool: _currentTool === 'shapes' ? 'shape-preview' : _currentTool,
       units: 'normalized',
       color: _currentColor,
-      alpha: isHighlighter ? 0.32 : 1,
+      alpha: isHighlighter ? 0.22 : 0.98,
       sizeRatio: (_currentTool === 'highlighter'
         ? Math.max(_strokeSize * 4, 16)
         : _strokeSize) / _pageWidth(state),
@@ -228,6 +264,10 @@ const Annotator = (() => {
   function _onMove(e, pageNum, state) {
     if (_currentTool === 'laser') {
       _showLaser(e);
+      if (state.drawing && state.activeLaserStroke) {
+        _pushPoint(state.activeLaserStroke.points, _fromPointer(e, state.canvas), state);
+        _redraw(state);
+      }
       return;
     }
 
@@ -243,14 +283,16 @@ const Annotator = (() => {
 
     if (!state.drawing || !state.currentStroke || _currentTool === 'select') return;
 
-    state.currentStroke.points.push(_fromPointer(e, state.canvas));
+    _pushPoint(state.currentStroke.points, _fromPointer(e, state.canvas), state);
     _redraw(state, _currentTool === 'shapes'
       ? _previewShape(state.currentStroke)
       : state.currentStroke);
   }
 
   function _onUp(e, pageNum, state) {
-    _hideLaser();
+    if (e?.pointerId != null && state.canvas.hasPointerCapture?.(e.pointerId)) {
+      state.canvas.releasePointerCapture(e.pointerId);
+    }
 
     if (_currentTool === 'eraser') {
       state.drawing = false;
@@ -266,6 +308,18 @@ const Annotator = (() => {
 
     if (_currentTool === 'laser') {
       state.drawing = false;
+      if (state.activeLaserStroke?.points?.length) {
+        const now = performance.now();
+        state.laserStrokes.push({
+          points: state.activeLaserStroke.points,
+          fadeStart: now + LASER_FADE_DELAY_MS,
+          removeAt: now + LASER_FADE_DELAY_MS + LASER_FADE_MS
+        });
+        state.activeLaserStroke = null;
+        _queueLaserAnimation(state);
+        _redraw(state);
+      }
+      _scheduleLaserHide(60);
       return;
     }
 
@@ -292,42 +346,101 @@ const Annotator = (() => {
     _notifyChange(pageNum);
   }
 
-  function _drawFreehand(ctx, state, stroke) {
+  function _pushPoint(points, point, state) {
+    const last = points[points.length - 1];
+    if (!last) {
+      points.push(point);
+      return;
+    }
+
+    const minDistance = Math.max(0.0012, 0.8 / _pageWidth(state));
+    if (_distance(last, point) < minDistance) {
+      last.pressure = (last.pressure + point.pressure) / 2;
+      return;
+    }
+
+    points.push(point);
+  }
+
+  function _strokeSegmentWidth(stroke, state, startPoint, endPoint) {
+    const baseWidth = _strokeWidthPx(stroke, state);
+    if (stroke.tool !== 'pen') return baseWidth;
+
+    const pressure = (
+      (typeof startPoint.pressure === 'number' ? startPoint.pressure : 0.58) +
+      (typeof endPoint.pressure === 'number' ? endPoint.pressure : 0.58)
+    ) / 2;
+    const distancePx = _distance(
+      _toCanvasPoint(state, startPoint),
+      _toCanvasPoint(state, endPoint)
+    );
+    const speedFactor = Math.min(1, distancePx / 22);
+
+    return Math.max(1.2, baseWidth * (0.82 + (pressure * 0.32) - (speedFactor * 0.08)));
+  }
+
+  function _drawSmoothedStroke(ctx, state, stroke, widthResolver) {
     const points = stroke.points || [];
     if (!points.length) return;
 
-    ctx.beginPath();
     ctx.strokeStyle = stroke.color;
-    ctx.lineWidth = _strokeWidthPx(stroke, state);
+    ctx.fillStyle = stroke.color;
     ctx.globalAlpha = typeof stroke.alpha === 'number' ? stroke.alpha : 1;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
-    ctx.globalCompositeOperation = stroke.tool === 'highlighter' ? 'multiply' : 'source-over';
 
     if (points.length === 1) {
       const single = _toCanvasPoint(state, points[0]);
-      ctx.arc(single.x, single.y, ctx.lineWidth / 2, 0, Math.PI * 2);
-      ctx.fillStyle = stroke.color;
+      const dotSize = widthResolver(points[0], points[0]);
+      ctx.beginPath();
+      ctx.arc(single.x, single.y, dotSize / 2, 0, Math.PI * 2);
       ctx.fill();
       return;
     }
 
-    const first = _toCanvasPoint(state, points[0]);
-    ctx.moveTo(first.x, first.y);
+    const logicalPoints = points.map((point) => ({
+      x: point.x * _pageWidth(state),
+      y: point.y * _pageHeight(state),
+      pressure: point.pressure
+    }));
 
-    for (let i = 1; i < points.length - 1; i += 1) {
-      const current = _toCanvasPoint(state, points[i]);
-      const next = _toCanvasPoint(state, points[i + 1]);
+    let previousAnchor = logicalPoints[0];
+    let previousMidpoint = previousAnchor;
+
+    for (let i = 1; i < logicalPoints.length; i += 1) {
+      const currentPoint = logicalPoints[i];
       const midpoint = {
-        x: (current.x + next.x) / 2,
-        y: (current.y + next.y) / 2
+        x: (previousAnchor.x + currentPoint.x) / 2,
+        y: (previousAnchor.y + currentPoint.y) / 2
       };
-      ctx.quadraticCurveTo(current.x, current.y, midpoint.x, midpoint.y);
+
+      ctx.beginPath();
+      ctx.lineWidth = widthResolver(points[i - 1], points[i]);
+      ctx.moveTo(previousMidpoint.x, previousMidpoint.y);
+      ctx.quadraticCurveTo(previousAnchor.x, previousAnchor.y, midpoint.x, midpoint.y);
+      ctx.stroke();
+
+      previousMidpoint = midpoint;
+      previousAnchor = currentPoint;
     }
 
-    const last = _toCanvasPoint(state, points[points.length - 1]);
-    ctx.lineTo(last.x, last.y);
+    const lastSource = points[points.length - 1];
+    const lastWidth = widthResolver(lastSource, lastSource);
+    ctx.beginPath();
+    ctx.lineWidth = lastWidth;
+    ctx.moveTo(previousMidpoint.x, previousMidpoint.y);
+    ctx.lineTo(previousAnchor.x, previousAnchor.y);
     ctx.stroke();
+  }
+
+  function _drawFreehand(ctx, state, stroke) {
+    ctx.globalCompositeOperation = stroke.tool === 'highlighter' ? 'multiply' : 'source-over';
+    _drawSmoothedStroke(
+      ctx,
+      state,
+      stroke,
+      (startPoint, endPoint) => _strokeSegmentWidth(stroke, state, startPoint, endPoint)
+    );
   }
 
   function _drawShape(ctx, state, stroke) {
@@ -397,15 +510,19 @@ const Annotator = (() => {
 
   function _redraw(state, previewStroke = null) {
     const { ctx, canvas, strokes } = state;
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.setTransform(state.pixelRatio || 1, 0, 0, state.pixelRatio || 1, 0, 0);
+    ctx.clearRect(0, 0, _pageWidth(state), _pageHeight(state));
 
     strokes.forEach((stroke) => _drawStroke(ctx, state, stroke));
     if (previewStroke) {
       _drawStroke(ctx, state, previewStroke);
     }
+    _drawLaserStrokes(ctx, state);
 
     ctx.globalAlpha = 1;
     ctx.globalCompositeOperation = 'source-over';
+    ctx.restore();
   }
 
   function _showEraser(e, state) {
@@ -419,15 +536,92 @@ const Annotator = (() => {
 
   function _showLaser(e) {
     if (!_laserEl) return;
-    _laserEl.classList.remove('hidden');
+    clearTimeout(_laserHideTimer);
+    _laserEl.classList.add('visible');
     _laserEl.style.left = `${e.clientX}px`;
     _laserEl.style.top = `${e.clientY}px`;
+    _laserHideTimer = setTimeout(() => {
+      if (!Array.from(_pages.values()).some((state) => state.drawing && _currentTool === 'laser')) {
+        _hideLaser();
+      }
+    }, LASER_IDLE_MS);
   }
 
   function _hideLaser() {
     if (_laserEl) {
-      _laserEl.classList.add('hidden');
+      clearTimeout(_laserHideTimer);
+      _laserEl.classList.remove('visible');
     }
+  }
+
+  function _scheduleLaserHide(delay = LASER_IDLE_MS) {
+    clearTimeout(_laserHideTimer);
+    _laserHideTimer = setTimeout(() => _hideLaser(), delay);
+  }
+
+  function _drawLaserStrokes(ctx, state) {
+    const now = performance.now();
+    const visibleStrokes = [];
+
+    if (state.activeLaserStroke?.points?.length) {
+      visibleStrokes.push({
+        points: state.activeLaserStroke.points,
+        alpha: 0.94
+      });
+    }
+
+    state.laserStrokes = state.laserStrokes.filter((stroke) => now < stroke.removeAt);
+
+    state.laserStrokes.forEach((stroke) => {
+      const alpha = now < stroke.fadeStart
+        ? 0.9
+        : Math.max(0, 0.9 * (1 - ((now - stroke.fadeStart) / LASER_FADE_MS)));
+      if (alpha > 0.01) {
+        visibleStrokes.push({
+          points: stroke.points,
+          alpha
+        });
+      }
+    });
+
+    visibleStrokes.forEach((stroke) => {
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      ctx.strokeStyle = `rgba(255, 74, 74, ${stroke.alpha})`;
+      ctx.fillStyle = `rgba(255, 90, 90, ${stroke.alpha})`;
+      ctx.shadowColor = `rgba(255, 70, 70, ${Math.min(1, stroke.alpha + 0.05)})`;
+      ctx.shadowBlur = 16;
+      _drawSmoothedStroke(
+        ctx,
+        state,
+        {
+          tool: 'laser',
+          points: stroke.points,
+          color: '#ff4a4a',
+          alpha: stroke.alpha,
+          sizeRatio: 7 / _pageWidth(state)
+        },
+        () => 6.5
+      );
+      ctx.restore();
+    });
+  }
+
+  function _queueLaserAnimation(state) {
+    if (state.laserAnimationFrame) return;
+
+    const tick = () => {
+      state.laserAnimationFrame = 0;
+      const now = performance.now();
+      const hasMoreLaser = state.laserStrokes.some((stroke) => now < stroke.removeAt);
+      _redraw(state);
+
+      if (hasMoreLaser || state.activeLaserStroke) {
+        state.laserAnimationFrame = requestAnimationFrame(tick);
+      }
+    };
+
+    state.laserAnimationFrame = requestAnimationFrame(tick);
   }
 
   function _distance(a, b) {
@@ -670,6 +864,11 @@ const Annotator = (() => {
   }
 
   function resetPages() {
+    _pages.forEach((state) => {
+      if (state.laserAnimationFrame) {
+        cancelAnimationFrame(state.laserAnimationFrame);
+      }
+    });
     _pages.clear();
     _eraserEl.style.display = 'none';
     _hideLaser();
@@ -735,7 +934,12 @@ const Annotator = (() => {
       canvas,
       ctx,
       strokes,
-      pageNum
+      pageNum,
+      renderWidth: width,
+      renderHeight: height,
+      pixelRatio: 1,
+      laserStrokes: [],
+      activeLaserStroke: null
     };
 
     _redraw(state);

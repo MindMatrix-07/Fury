@@ -1,6 +1,6 @@
 {
   "name": "fury",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "GoodNotes-inspired PDF notebook for Windows, packaged as a desktop app with Electron.",
   "main": "electron/main.js",
   "author": "MindMatrix-07",
