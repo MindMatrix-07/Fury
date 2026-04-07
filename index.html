@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Fury — PDF Notebook Studio</title>
+  <meta name="description" content="Fury is a minimal, GoodNotes-inspired PDF notebook for Windows-friendly study, annotation, export, and handwritten review." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&family=Caveat:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/style.css" />
+</head>
+<body class="light">
+
+  <!-- ═══════════════════ SPLASH SCREEN ═══════════════════ -->
+  <div id="splash" class="splash">
+    <div class="splash-inner">
+      <div class="fury-logo">
+        <span class="logo-f">F</span>
+        <span class="logo-rest">ury</span>
+      </div>
+      <p class="splash-tagline">Study. Annotate. Understand.</p>
+      <div class="splash-actions" style="display:flex; gap: 10px;">
+        <button id="open-btn" class="btn-primary" type="button">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+          Open PDF
+        </button>
+        <button id="create-notebook-btn" class="btn-primary" style="background: var(--surface2); color: var(--text-primary); border: 1px solid var(--border-mid);">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+          Create Notebook
+        </button>
+      </div>
+      <input type="file" id="pdf-input" accept="application/pdf" style="display:none" />
+      <p class="splash-hint">Your annotations are saved locally — nothing leaves your device.</p>
+    </div>
+  </div>
+
+  <!-- ═══════════════════ MAIN APP ═══════════════════ -->
+  <div id="app" class="app hidden">
+
+    <!-- Top Bar -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <div class="fury-logo-small">
+          <span class="logo-f">F</span><span class="logo-rest">ury</span>
+        </div>
+        <span id="doc-title" class="doc-title">Untitled.pdf</span>
+      </div>
+
+      <div class="topbar-center">
+        <!-- Toolbar Tools -->
+        <div class="toolbar" id="toolbar">
+          <button class="tool-btn" id="tool-select" title="Pan / Select (V)" data-tool="select">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 3l14 9-7 1-3 6z"/></svg>
+          </button>
+          <div class="tool-divider"></div>
+          <button class="tool-btn active" id="tool-pen" title="Pen" data-tool="pen">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+          </button>
+          <button class="tool-btn" id="tool-highlighter" title="Highlighter" data-tool="highlighter">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9"/><rect x="3" y="11" width="10" height="6" rx="1"/><path d="M8 11V5a2 2 0 0 1 4 0v6"/></svg>
+          </button>
+          <button class="tool-btn" id="tool-text" title="Text Note" data-tool="text">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></svg>
+          </button>
+          <button class="tool-btn" id="tool-laser" title="Laser Pointer (L)" data-tool="laser">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="4.5" y1="19.5" x2="15" y2="9"/><circle cx="17" cy="7" r="2"/><path d="M15 9l3-3"/><path d="M19 5l1-1"/></svg>
+          </button>
+          <button class="tool-btn" id="tool-shapes" title="Shapes - Draw To Snap (S)" data-tool="shapes">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><circle cx="17" cy="7" r="3"/><polygon points="12,22 4,22 8,15"/><line x1="15" y1="15" x2="21" y2="21"/></svg>
+          </button>
+          <button class="tool-btn" id="tool-eraser" title="Eraser" data-tool="eraser">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 20H7L3 16l11-11 7 7-1 8z"/><path d="M6.0711 11.0711L13 18"/></svg>
+          </button>
+          <div class="tool-divider"></div>
+
+          <!-- Color Swatch -->
+          <div class="color-group" id="color-group">
+            <button class="color-dot active" data-color="#111111" style="background:#111111" title="Black"></button>
+            <button class="color-dot" data-color="#2196F3" style="background:#2196F3" title="Blue"></button>
+            <button class="color-dot" data-color="#F44336" style="background:#F44336" title="Red"></button>
+            <button class="color-dot" data-color="#4CAF50" style="background:#4CAF50" title="Green"></button>
+            <button class="color-dot highlight" data-color="#FFEB3B" style="background:#FFEB3B" title="Yellow Highlight"></button>
+            <button class="color-dot highlight" data-color="#00E676" style="background:#00E676" title="Green Highlight"></button>
+            <button class="color-dot highlight" data-color="#FF4081" style="background:#FF4081" title="Pink Highlight"></button>
+            <label class="color-dot custom-color-label" title="Custom RGB Color" style="background: conic-gradient(red, yellow, lime, aqua, blue, magenta, red); overflow: hidden;">
+              <input type="color" id="custom-color" value="#000000" style="opacity:0; width:100%; height:100%; cursor:pointer; padding:0; border:none; display:block;">
+            </label>
+          </div>
+
+          <div class="tool-divider"></div>
+
+          <!-- Stroke Size -->
+          <div class="stroke-group">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="4"/></svg>
+            <input type="range" id="stroke-size" min="1" max="20" value="3" class="slider" title="Stroke size" />
+          </div>
+
+          <div class="tool-divider"></div>
+
+          <!-- Undo / Redo -->
+          <button class="tool-btn" id="undo-btn" title="Undo (Ctrl+Z)">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>
+          </button>
+          <button class="tool-btn" id="redo-btn" title="Redo (Ctrl+Y)">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/></svg>
+          </button>
+          <div class="tool-divider"></div>
+          <!-- Clear Page -->
+          <button class="tool-btn danger" id="clear-page-btn" title="Clear annotations on this page">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <div class="topbar-right">
+        <!-- Zoom -->
+        <div class="zoom-group">
+          <button class="icon-btn" id="zoom-out" title="Zoom Out">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+          </button>
+          <span id="zoom-label" class="zoom-label">100%</span>
+          <button class="icon-btn" id="zoom-in" title="Zoom In">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>
+          </button>
+        </div>
+
+        <!-- Theme toggle -->
+        <button class="icon-btn" id="theme-toggle" title="Toggle dark mode">
+          <svg id="theme-icon-light" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+          <svg id="theme-icon-dark" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        </button>
+
+        <button class="btn-quiet" id="export-btn" title="Download annotated PDF">
+          Export PDF
+        </button>
+
+        <!-- New PDF -->
+        <button class="icon-btn" id="open-btn-2" title="Open new PDF" type="button">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        </button>
+        <input type="file" id="pdf-input-2" accept="application/pdf" style="display:none" />
+
+        <!-- Page indicator -->
+        <div class="page-indicator">
+          <span id="page-current">1</span>
+          <span class="sep">/</span>
+          <span id="page-total">—</span>
+        </div>
+      </div>
+    </header>
+
+    <!-- Body: Sidebar + Viewer -->
+    <div class="body-wrap">
+
+      <!-- Sidebar -->
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-header">
+          <span>Pages</span>
+          <div class="sidebar-actions">
+            <button class="mini-icon-btn" id="add-page-btn" title="Add a blank page">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+            <button class="mini-icon-btn" id="duplicate-page-btn" title="Duplicate current page">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+            <button class="mini-icon-btn danger" id="delete-page-btn" title="Delete current page">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+            </button>
+          </div>
+        </div>
+        <div class="thumb-list" id="thumb-list"></div>
+      </aside>
+
+      <!-- PDF Canvas Area -->
+      <main class="viewer-wrap" id="viewer-wrap">
+        <div class="pages-container" id="pages-container"></div>
+      </main>
+
+    </div>
+
+  </div>
+
+  <div id="status-pill" class="status-pill hidden" aria-live="polite"></div>
+  <div id="laser-pointer" class="laser-pointer hidden"></div>
+
+  <!-- ═══════════════════ TEXT INPUT OVERLAY ═══════════════════ -->
+  <textarea id="floating-text" class="floating-text hidden" placeholder="Type your note…"></textarea>
+
+  <!-- Scripts -->
+  <script src="node_modules/pdf-lib/dist/pdf-lib.min.js"></script>
+  <script src="node_modules/pdfjs-dist/build/pdf.min.js"></script>
+  <script>
+    // Set worker source
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'node_modules/pdfjs-dist/build/pdf.worker.min.js';
+  </script>
+  <script src="js/storage.js"></script>
+  <script src="js/annotator.js"></script>
+  <script src="js/toolbar.js"></script>
+  <script src="js/sidebar.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

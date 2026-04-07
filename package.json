@@ -1,0 +1,47 @@
+{
+  "name": "fury",
+  "version": "0.1.0",
+  "description": "GoodNotes-inspired PDF notebook for Windows, packaged as a desktop app with Electron.",
+  "main": "electron/main.js",
+  "author": "MindMatrix-07",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable",
+    "dist:dir": "electron-builder --dir"
+  },
+  "build": {
+    "appId": "com.mindmatrix.fury",
+    "productName": "Fury",
+    "asar": true,
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "index.html",
+      "css/**/*",
+      "js/**/*",
+      "electron/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "Fury-${version}-portable.${ext}"
+    }
+  },
+  "devDependencies": {
+    "electron": "^41.1.1",
+    "electron-builder": "^26.8.1"
+  },
+  "dependencies": {
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^3.11.174"
+  }
+}
